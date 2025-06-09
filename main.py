@@ -25,10 +25,65 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 提示词模板字典
+PROMPT_TEMPLATES = {
+    "单一指令解析": """请将以下债券交易文本解析为JSON格式，只返回JSON对象，不要包含其他文字说明：
+{text}
+
+需要提取的字段：
+- assetCode: 债券代码为含有 4 位数字及以上纯数字不包括（小数点，加号等任意特殊字符）且不能被100整除或者含有任一关键字 (.IB,.SH,.SZ等，该关键字支持配置)；
+- assetName: 债券名称
+- trdSide: 交易方向（买入/卖出）
+- amount: 交易金额（数字）
+- rate: 利率（数字）
+- amountReqFlag: 金额是否需请示（布尔值，当金额前有*号时为true）
+- rateReqFlag: 利率是否需请示（布尔值，当利率前有*号时为true）
+
+""",
+    
+    "带请示单一指令解析": """请将以下债券交易文本解析为JSON格式，特别注意标有*号的金额和利率需要请示，只返回JSON对象，不要包含其他文字说明：
+{text}
+
+需要提取的字段：
+- assetCode: 债券代码为含有 4 位数字及以上纯数字不包括（小数点，加号等任意特殊字符）且不能被100整除或者含有任一关键字 (.IB,.SH,.SZ等，该关键字支持配置)；
+- assetName: 债券名称
+- trdSide: 交易方向（买入/卖出）
+- amount: 交易金额（数字）
+- rate: 利率（数字）
+- amountReqFlag: 金额是否需请示（布尔值，当金额前有*号或包含"可议价"、"价格可议"等关键词时为true）
+- rateReqFlag: 利率是否需请示（布尔值，当利率前有*号或包含"可议价"、"价格可议"等关键词时为true）
+
+""",
+    
+    "债券交易助手对话": """你是一个专业的债券交易助手。请基于以下信息回答问题：
+
+问题：{question}
+
+{context_info}
+
+请逐步思考并回答。每步思考都要清晰说明。""",
+    
+    "多产品指令语料解析": """请将以下包含多个债券产品的交易文本解析为JSON数组格式，每个产品对应一个JSON对象，只返回JSON数组，不要包含其他文字说明：
+{text}
+
+每个产品需要提取的字段：
+- assetCode: 债券代码为含有 4 位数字及以上纯数字不包括（小数点，加号等任意特殊字符）且不能被100整除或者含有任一关键字 (.IB,.SH,.SZ等，该关键字支持配置)；
+- assetName: 债券名称
+- trdSide: 交易方向（买入/卖出）
+- amount: 交易金额（数字）
+- rate: 利率（数字）
+- amountReqFlag: 金额是否需请示（布尔值，当金额前有*号时为true）
+- rateReqFlag: 利率是否需请示（布尔值，当利率前有*号时为true）
+- fundName: 基金名称,这是个list,需要提取出基金名称,可能包含多个基金名称
+
+"""
+}
+
 app = FastAPI()
 
 class BondTextInput(BaseModel):
     text: str
+    prompt_type: str = "单一指令解析"  # 默认使用单一指令解析
 
 class ChatInput(BaseModel):
     question: str
@@ -42,6 +97,100 @@ class BondParsedOutput(BaseModel):
     rate: float
     amountReqFlag: bool
     rateReqFlag: bool
+    fundName: list = []  # 可选字段，默认为空列表
+
+def get_prompt_template(prompt_type: str, **kwargs) -> str:
+    """获取指定类型的提示词模板并填充参数"""
+    if prompt_type not in PROMPT_TEMPLATES:
+        logger.warning(f"Unknown prompt type: {prompt_type}, using default")
+        prompt_type = "单一指令解析"
+    
+    template = PROMPT_TEMPLATES[prompt_type]
+    try:
+        return template.format(**kwargs)
+    except KeyError as e:
+        logger.error(f"Missing parameter for prompt template {prompt_type}: {e}")
+        raise ValueError(f"Missing parameter for prompt template: {e}")
+
+def normalize_parsed_data(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
+    """标准化解析后的数据，确保数据类型正确"""
+    try:
+        logger.info(f"Normalizing parsed data: {parsed_data}")
+        
+        # 创建标准化后的数据字典
+        normalized_data = {}
+        
+        # 处理 assetCode - 确保是字符串
+        normalized_data["assetCode"] = str(parsed_data.get("assetCode", ""))
+        
+        # 处理 assetName - 确保是字符串
+        normalized_data["assetName"] = str(parsed_data.get("assetName", ""))
+        
+        # 处理 trdSide - 转换布尔值或其他类型为字符串
+        trd_side = parsed_data.get("trdSide", "")
+        if isinstance(trd_side, bool):
+            # 如果是布尔值，根据业务逻辑转换（这里需要根据实际情况调整）
+            normalized_data["trdSide"] = "买入" if trd_side else "卖出"
+        elif isinstance(trd_side, str):
+            normalized_data["trdSide"] = trd_side
+        else:
+            normalized_data["trdSide"] = str(trd_side)
+        
+        # 处理 amount - 确保是 float
+        amount = parsed_data.get("amount", 0)
+        if isinstance(amount, str):
+            try:
+                # 移除可能的非数字字符
+                amount_str = amount.replace(",", "").replace("万", "").replace("亿", "")
+                normalized_data["amount"] = float(amount_str)
+                # 处理万、亿单位
+                if "万" in str(parsed_data.get("amount", "")):
+                    normalized_data["amount"] *= 10000
+                elif "亿" in str(parsed_data.get("amount", "")):
+                    normalized_data["amount"] *= 100000000
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert amount to float: {amount}")
+                normalized_data["amount"] = 0.0
+        else:
+            normalized_data["amount"] = float(amount)
+        
+        # 处理 rate - 确保是 float
+        rate = parsed_data.get("rate", 0)
+        if isinstance(rate, str):
+            try:
+                # 移除百分号
+                rate_str = rate.replace("%", "")
+                normalized_data["rate"] = float(rate_str)
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert rate to float: {rate}")
+                normalized_data["rate"] = 0.0
+        else:
+            normalized_data["rate"] = float(rate)
+        
+        # 处理 amountReqFlag - 确保是布尔值
+        amount_req_flag = parsed_data.get("amountReqFlag", False)
+        normalized_data["amountReqFlag"] = bool(amount_req_flag)
+        
+        # 处理 rateReqFlag - 确保是布尔值
+        rate_req_flag = parsed_data.get("rateReqFlag", False)
+        normalized_data["rateReqFlag"] = bool(rate_req_flag)
+        
+        # 处理 fundName - 确保是列表
+        fund_name = parsed_data.get("fundName", [])
+        if isinstance(fund_name, list):
+            normalized_data["fundName"] = fund_name
+        elif isinstance(fund_name, str):
+            # 如果是字符串，尝试分割成列表
+            normalized_data["fundName"] = [fund_name] if fund_name else []
+        else:
+            normalized_data["fundName"] = []
+        
+        logger.info(f"Normalized data: {normalized_data}")
+        return normalized_data
+        
+    except Exception as e:
+        logger.error(f"Error normalizing parsed data: {str(e)}")
+        raise ValueError(f"Error normalizing parsed data: {str(e)}")
 
 def validate_ollama_response(response_data: Dict[str, Any]) -> Dict[str, Any]:
     """验证并处理 Ollama 模型返回的数据"""
@@ -64,7 +213,8 @@ def validate_ollama_response(response_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             parsed_response = json.loads(cleaned_text)
             logger.info(f"Successfully parsed JSON response: {parsed_response}")
-            return parsed_response
+            # 标准化数据类型
+            return normalize_parsed_data(parsed_response)
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error: {str(e)}")
             # 如果直接解析失败，尝试从文本中提取 JSON
@@ -75,7 +225,8 @@ def validate_ollama_response(response_data: Dict[str, Any]) -> Dict[str, Any]:
                 json_str = json_match.group()
                 logger.info(f"Extracted JSON string: {json_str}")
                 try:
-                    return json.loads(json_str)
+                    parsed_response = json.loads(json_str)
+                    return normalize_parsed_data(parsed_response)
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse extracted JSON: {str(e)}")
                     # 尝试修复常见的 JSON 格式问题
@@ -84,7 +235,8 @@ def validate_ollama_response(response_data: Dict[str, Any]) -> Dict[str, Any]:
                         json_str = json_str.replace("'", '"')
                         # 修复可能的键值对格式问题
                         json_str = re.sub(r'(\w+):', r'"\1":', json_str)
-                        return json.loads(json_str)
+                        parsed_response = json.loads(json_str)
+                        return normalize_parsed_data(parsed_response)
                     except Exception as e:
                         logger.error(f"Failed to fix and parse JSON: {str(e)}")
                         raise ValueError(f"Invalid JSON format in extracted string: {str(e)}")
@@ -127,10 +279,11 @@ def validate_ollama_response(response_data: Dict[str, Any]) -> Dict[str, Any]:
                         "amount": amount_value,
                         "rate": rate_value,
                         "amountReqFlag": amount_req_flag or "可议价" in cleaned_text or "价格可议" in cleaned_text,
-                        "rateReqFlag": rate_req_flag or "可议价" in cleaned_text or "价格可议" in cleaned_text
+                        "rateReqFlag": rate_req_flag or "可议价" in cleaned_text or "价格可议" in cleaned_text,
+                        "fundName": []
                     }
                     logger.info(f"Created basic response from text: {basic_response}")
-                    return basic_response
+                    return normalize_parsed_data(basic_response)
             except Exception as e:
                 logger.error(f"Failed to create basic response: {str(e)}")
             
@@ -140,10 +293,10 @@ def validate_ollama_response(response_data: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Error validating Ollama response: {str(e)}")
         raise
 
-def call_ollama_model(text: str) -> dict:
+def call_ollama_model(text: str, prompt_type: str = "单一指令解析") -> dict:
     """Call the local Ollama Qwen model for text parsing"""
     try:
-        logger.info(f"Calling Ollama model with text: {text}")
+        logger.info(f"Calling Ollama model with text: {text}, prompt_type: {prompt_type}")
         
         # 检查 Ollama 服务是否可用
         try:
@@ -176,22 +329,13 @@ def call_ollama_model(text: str) -> dict:
                 detail="Error checking model availability. Please ensure Ollama is properly configured."
             )
 
+        # 使用提示词模板
+        prompt = get_prompt_template(prompt_type, text=text)
+        
         # 构建请求数据
         request_data = {
             "model": "qwen3:0.6b",
-            "prompt": f"""请将以下债券交易文本解析为JSON格式，只返回JSON对象，不要包含其他文字说明：
-            {text}
-            
-            需要提取的字段：
-            - assetCode: 债券代码为含有 4 位数字及以上纯数字不包括（小数点，加号等任意特殊字符）且不能被100整除或者含有任一关键字 (.IB,.SH,.SZ等，该关键字支持配置)；
-            - assetName: 债券名称
-            - trdSide: 交易方向（买入/卖出）
-            - amount: 交易金额（数字）
-            - rate: 利率（数字）
-            - amountReqFlag: 金额是否需请示（布尔值，当金额前有*号时为true）
-            - rateReqFlag: 利率是否需请示（布尔值，当利率前有*号时为true）
-            
-            """,
+            "prompt": prompt,
             "stream": False
         }
         logger.info(f"Sending request to Ollama: {json.dumps(request_data, ensure_ascii=False)}")
@@ -234,8 +378,8 @@ async def parse_bond_text(input_data: BondTextInput):
     Parse bond trading text and extract structured information
     """
     try:
-        logger.info(f"Received request to parse bond text: {input_data.text}")
-        parsed_data = call_ollama_model(input_data.text)
+        logger.info(f"Received request to parse bond text: {input_data.text}, prompt_type: {input_data.prompt_type}")
+        parsed_data = call_ollama_model(input_data.text, input_data.prompt_type)
         
         # 验证数据类型
         try:
@@ -288,14 +432,13 @@ async def chat_endpoint(chat_input: ChatInput):
     """Interactive chat endpoint with SSE"""
     async def event_generator():
         try:
-            # 构建提示词
-            prompt = f"""你是一个专业的债券交易助手。请基于以下信息回答问题：
-
-问题：{chat_input.question}
-
-{f'上下文信息：{chat_input.context}' if chat_input.context else ''}
-
-请逐步思考并回答。每步思考都要清晰说明。"""
+            # 使用提示词模板
+            context_info = f'上下文信息：{chat_input.context}' if chat_input.context else ''
+            prompt = get_prompt_template(
+                "债券交易助手对话", 
+                question=chat_input.question,
+                context_info=context_info
+            )
             
             # 发送思考过程
             yield f"data: {json.dumps({'type': 'thinking', 'content': '开始分析问题...'}, ensure_ascii=False)}\n\n"
@@ -313,6 +456,14 @@ async def chat_endpoint(chat_input: ChatInput):
         event_generator(),
         media_type="text/event-stream"
     )
+
+@app.get("/prompt-templates")
+async def get_prompt_templates():
+    """获取所有可用的提示词模板名称"""
+    return {
+        "available_templates": list(PROMPT_TEMPLATES.keys()),
+        "templates": PROMPT_TEMPLATES
+    }
 
 if __name__ == "__main__":
     import uvicorn
