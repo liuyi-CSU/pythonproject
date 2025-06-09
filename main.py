@@ -183,7 +183,7 @@ def call_ollama_model(text: str) -> dict:
             {text}
             
             需要提取的字段：
-            - assetCode: 债券代码
+            - assetCode: 债券代码为含有 4 位数字及以上纯数字不包括（小数点，加号等任意特殊字符）且不能被100整除或者含有任一关键字 (.IB,.SH,.SZ等，该关键字支持配置)；
             - assetName: 债券名称
             - trdSide: 交易方向（买入/卖出）
             - amount: 交易金额（数字）
@@ -191,16 +191,7 @@ def call_ollama_model(text: str) -> dict:
             - amountReqFlag: 金额是否需请示（布尔值，当金额前有*号时为true）
             - rateReqFlag: 利率是否需请示（布尔值，当利率前有*号时为true）
             
-            示例输出格式：
-            {{
-                "assetCode": "21国债01",
-                "assetName": "21国债01",
-                "trdSide": "买入",
-                "amount": 10000000,
-                "rate": 3.5,
-                "amountReqFlag": true,
-                "rateReqFlag": true
-            }}""",
+            """,
             "stream": False
         }
         logger.info(f"Sending request to Ollama: {json.dumps(request_data, ensure_ascii=False)}")
@@ -264,7 +255,7 @@ async def parse_bond_text(input_data: BondTextInput):
         logger.error(f"Unexpected error in parse_bond_text: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error parsing bond text: {str(e)}")
 
-async def (text: str) -> AsyncGenerator[str, None]:
+async def stream_ollama_response(text: str) -> AsyncGenerator[str, None]:
     """Stream response from Ollama model"""
     try:
         response = requests.post(
