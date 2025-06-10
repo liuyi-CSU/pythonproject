@@ -14,6 +14,9 @@ from typing import Dict, Any, AsyncGenerator
 import asyncio
 import time
 
+# 导入智能提示词管理器
+from prompt_manager import smart_get_prompt
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -85,6 +88,10 @@ class BondTextInput(BaseModel):
     text: str
     prompt_type: str = "单一指令解析"  # 默认使用单一指令解析
 
+class SmartBondTextInput(BaseModel):
+    text: str
+    context: str = ""  # 可选的上下文信息
+
 class ChatInput(BaseModel):
     question: str
     context: str = ""  # 可选的上下文信息
@@ -98,6 +105,10 @@ class BondParsedOutput(BaseModel):
     amountReqFlag: bool
     rateReqFlag: bool
     fundName: list = []  # 可选字段，默认为空列表
+
+class SmartBondParsedOutput(BaseModel):
+    parsed_data: BondParsedOutput
+    ai_analysis: Dict[str, Any]
 
 def get_prompt_template(prompt_type: str, **kwargs) -> str:
     """获取指定类型的提示词模板并填充参数"""
@@ -399,6 +410,78 @@ async def parse_bond_text(input_data: BondTextInput):
         logger.error(f"Unexpected error in parse_bond_text: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error parsing bond text: {str(e)}")
 
+@app.post("/smart-parse-bond-text", response_model=SmartBondParsedOutput)
+async def smart_parse_bond_text(input_data: SmartBondTextInput):
+    """
+    智能解析债券交易文本 - AI自动选择最适合的提示词模板
+    """
+    try:
+        logger.info(f"Received smart parse request: {input_data.text}, context: {input_data.context}")
+        
+        # 使用AI智能选择提示词
+        prompt_result = smart_get_prompt(input_data.text, input_data.context)
+        
+        logger.info(f"AI recommended prompt type: {prompt_result['recommended_prompt_type']}")
+        logger.info(f"AI reasoning: {prompt_result['reasoning']}")
+        
+        # 调用模型解析（使用AI推荐的提示词类型）
+        parsed_data = call_ollama_model(
+            input_data.text, 
+            prompt_result['recommended_prompt_type']
+        )
+        
+        # 验证解析结果
+        try:
+            validated_parsed_data = BondParsedOutput(**parsed_data)
+        except Exception as e:
+            logger.error(f"Error validating parsed data: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error validating parsed data: {str(e)}"
+            )
+        
+        # 构建包含AI分析的响应
+        result = SmartBondParsedOutput(
+            parsed_data=validated_parsed_data,
+            ai_analysis={
+                "recommended_prompt_type": prompt_result['recommended_prompt_type'],
+                "reasoning": prompt_result['reasoning'],
+                "text_characteristics": prompt_result['text_characteristics'],
+                "confidence": "high",  # 可以根据需要添加置信度评估
+                "processing_time": time.time()  # 可以添加处理时间
+            }
+        )
+        
+        logger.info(f"Successfully completed smart parsing with AI analysis")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in smart_parse_bond_text: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error in smart bond text parsing: {str(e)}")
+
+@app.get("/prompt-analysis")
+async def analyze_prompt_selection(text: str):
+    """
+    分析文本特征和AI推荐的提示词类型（仅用于调试和分析）
+    """
+    try:
+        logger.info(f"Analyzing prompt selection for text: {text}")
+        
+        # 使用智能提示词管理器进行分析
+        analysis_result = smart_get_prompt(text)
+        
+        return {
+            "input_text": text,
+            "analysis": analysis_result,
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in prompt analysis: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error analyzing prompt selection: {str(e)}")
+
 async def stream_ollama_response(text: str) -> AsyncGenerator[str, None]:
     """Stream response from Ollama model"""
     try:
@@ -460,10 +543,62 @@ async def chat_endpoint(chat_input: ChatInput):
 @app.get("/prompt-templates")
 async def get_prompt_templates():
     """获取所有可用的提示词模板名称"""
-    return {
-        "available_templates": list(PROMPT_TEMPLATES.keys()),
-        "templates": PROMPT_TEMPLATES
-    }
+    try:
+        # 使用智能提示词管理器获取模板信息
+        from prompt_manager import get_available_prompts
+        available_prompts = get_available_prompts()
+        
+        return {
+            "available_templates": available_prompts["available_prompts"],
+            "descriptions": available_prompts["descriptions"],
+            "legacy_templates": list(PROMPT_TEMPLATES.keys()),  # 保留原有模板信息
+            "smart_prompt_manager": "enabled"
+        }
+    except Exception as e:
+        logger.error(f"Error getting prompt templates: {str(e)}")
+        # 如果智能管理器出错，回退到原有模板
+        return {
+            "available_templates": list(PROMPT_TEMPLATES.keys()),
+            "templates": PROMPT_TEMPLATES,
+            "smart_prompt_manager": "disabled",
+            "error": str(e)
+        }
+
+@app.get("/smart-features")
+async def get_smart_features():
+    """获取智能功能特性信息"""
+    try:
+        from prompt_manager import prompt_manager
+        
+        return {
+            "smart_prompt_selection": {
+                "enabled": True,
+                "version": "1.0.0",
+                "description": "AI自动选择最适合的提示词模板"
+            },
+            "features": {
+                "text_analysis": "分析文本特征（*号、多产品、可议价、问答等）",
+                "intelligent_recommendation": "基于特征智能推荐提示词类型",
+                "reasoning_explanation": "提供详细的推理过程说明",
+                "template_management": "支持模板的增删改查和导入导出"
+            },
+            "supported_prompt_types": prompt_manager.get_available_prompts()["available_prompts"],
+            "detection_capabilities": {
+                "asterisk_marking": "检测*号请示标记",
+                "multiple_products": "识别多产品交易指令",
+                "negotiable_keywords": "识别可议价关键词",
+                "question_detection": "检测问答模式",
+                "fund_names": "识别基金名称"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting smart features: {str(e)}")
+        return {
+            "smart_prompt_selection": {
+                "enabled": False,
+                "error": str(e)
+            }
+        }
 
 if __name__ == "__main__":
     import uvicorn
