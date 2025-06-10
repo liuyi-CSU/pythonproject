@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "bond-prompt-server": {
+      "command": "python",
+      "args": ["mcp_prompt_server.py"],
+      "env": {},
+      "description": "Bond Trading Prompt Template Server - 智能选择债券交易提示词模板"
+    }
+  }
+} 

@@ -1,0 +1,169 @@
+{
+    "info": {
+        "name": "智能债券解析API - 基于基金名称的多产品识别",
+        "description": "展示修改后的智能债券交易文本解析接口，现在基于基金名称数量来判断多产品",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "智能解析 - 单个基金名称",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"text\": \"富国基金买入21国债09 5000万 利率3.2%\",\n    \"context\": \"单个基金的交易指令\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8000/smart-parse-bond-text",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["smart-parse-bond-text"]
+                },
+                "description": "测试单个基金名称的智能解析，应该识别为单一指令解析"
+            }
+        },
+        {
+            "name": "智能解析 - 多个基金名称（应触发多产品解析）",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"text\": \"富国基金买入21国债09 3000万 利率3.1%，华夏基金买入22国债15 2000万 利率2.9%\",\n    \"context\": \"多个基金的批量交易指令\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8000/smart-parse-bond-text",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["smart-parse-bond-text"]
+                },
+                "description": "测试多个基金名称的智能解析，应该识别为多产品指令解析"
+            }
+        },
+        {
+            "name": "智能解析 - 三个基金名称",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"text\": \"嘉实货币基金买入21国债09 1000万，博时基金买入22国债15 2000万，广发基金买入23国债10 1500万\",\n    \"context\": \"三个基金的复杂交易指令\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8000/smart-parse-bond-text",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["smart-parse-bond-text"]
+                },
+                "description": "测试三个基金名称的智能解析，应该识别为多产品指令解析"
+            }
+        },
+        {
+            "name": "智能解析 - 无基金名称的普通指令",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"text\": \"买入21国债09 5000万 利率3.2%\",\n    \"context\": \"普通的单一债券交易指令\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8000/smart-parse-bond-text",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["smart-parse-bond-text"]
+                },
+                "description": "测试无基金名称的普通指令，应该识别为单一指令解析"
+            }
+        },
+        {
+            "name": "智能解析 - 带请示标记的单个基金",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"text\": \"富国基金买入21国债09 *5000万 利率*3.2%\",\n    \"context\": \"带请示标记的单个基金交易指令\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8000/smart-parse-bond-text",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["smart-parse-bond-text"]
+                },
+                "description": "测试带请示标记的单个基金，应该识别为带请示单一指令解析（*号优先级高于基金数量）"
+            }
+        },
+        {
+            "name": "提示词分析 - 多基金场景",
+            "request": {
+                "method": "GET",
+                "url": {
+                    "raw": "http://localhost:8000/prompt-analysis?text=富国基金买入21国债09 3000万，华夏基金买入22国债15 2000万",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["prompt-analysis"],
+                    "query": [
+                        {
+                            "key": "text",
+                            "value": "富国基金买入21国债09 3000万，华夏基金买入22国债15 2000万"
+                        }
+                    ]
+                },
+                "description": "分析多基金场景的文本特征，查看基金名称识别和推理过程"
+            }
+        },
+        {
+            "name": "提示词分析 - 单基金场景",
+            "request": {
+                "method": "GET",
+                "url": {
+                    "raw": "http://localhost:8000/prompt-analysis?text=嘉实货币买入21国债09 1000万 利率3.2%",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["prompt-analysis"],
+                    "query": [
+                        {
+                            "key": "text",
+                            "value": "嘉实货币买入21国债09 1000万 利率3.2%"
+                        }
+                    ]
+                },
+                "description": "分析单基金场景的文本特征，验证不会被误判为多产品"
+            }
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000",
+            "type": "string"
+        }
+    ]
+} 
