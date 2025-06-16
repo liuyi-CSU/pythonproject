@@ -148,8 +148,10 @@ def normalize_parsed_data(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
             normalized_data["trdSide"] = str(trd_side)
         
         # 处理 amount - 确保是 float
-        amount = parsed_data.get("amount", 0)
-        if isinstance(amount, str):
+        amount = parsed_data.get("amount")
+        if amount is None:
+            normalized_data["amount"] = 0.0
+        elif isinstance(amount, str):
             try:
                 # 移除可能的非数字字符
                 amount_str = amount.replace(",", "").replace("万", "").replace("亿", "")
@@ -163,11 +165,17 @@ def normalize_parsed_data(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.warning(f"Could not convert amount to float: {amount}")
                 normalized_data["amount"] = 0.0
         else:
-            normalized_data["amount"] = float(amount)
+            try:
+                normalized_data["amount"] = float(amount)
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert amount to float: {amount}")
+                normalized_data["amount"] = 0.0
         
         # 处理 rate - 确保是 float
-        rate = parsed_data.get("rate", 0)
-        if isinstance(rate, str):
+        rate = parsed_data.get("rate")
+        if rate is None:
+            normalized_data["rate"] = 0.0
+        elif isinstance(rate, str):
             try:
                 # 移除百分号
                 rate_str = rate.replace("%", "")
@@ -176,7 +184,11 @@ def normalize_parsed_data(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.warning(f"Could not convert rate to float: {rate}")
                 normalized_data["rate"] = 0.0
         else:
-            normalized_data["rate"] = float(rate)
+            try:
+                normalized_data["rate"] = float(rate)
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert rate to float: {rate}")
+                normalized_data["rate"] = 0.0
         
         # 处理 amountReqFlag - 确保是布尔值
         amount_req_flag = parsed_data.get("amountReqFlag", False)
